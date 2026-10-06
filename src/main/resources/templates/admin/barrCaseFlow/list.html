@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.pollix.at/thymeleaf/shiro">
+<head>
+    <th:block th:include="include :: header('一户一档改造卷宗')"/>
+</head>
+<body class="pear-container">
+<div class="layui-card">
+    <div class="layui-card-body">
+        <form class="layui-form" id="case-query-form">
+            <div class="layui-form-item">
+                <label class="layui-form-label">卷宗号</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="bizNo" placeholder="整段或开头几笔" class="layui-input">
+                </div>
+                <label class="layui-form-label">住户代号</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="ownerCode" placeholder="整段或开头几笔" class="layui-input">
+                </div>
+                <label class="layui-form-label">点位代号</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="siteNo" placeholder="整段或开头几笔" class="layui-input">
+                </div>
+                <button class="pear-btn pear-btn-md pear-btn-primary" lay-submit lay-filter="case-query">
+                    <i class="layui-icon layui-icon-search"></i> 查询
+                </button>
+                <button type="reset" class="pear-btn pear-btn-md">
+                    <i class="layui-icon layui-icon-refresh"></i> 重置
+                </button>
+                <span class="layui-badge layui-bg-green" th:text="'在办卷宗：' + ${activeCount} + ' 张'"></span>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-body">
+        <table id="case-table" lay-filter="case-table"></table>
+    </div>
+</div>
+</body>
+
+<script type="text/html" id="case-toolbar">
+    <button shiro:hasPermission="barrCaseFlow:open" class="pear-btn pear-btn-primary pear-btn-md" lay-event="add">
+        <i class="layui-icon layui-icon-add-1"></i> 凑齐四样起一卷
+    </button>
+</script>
+
+<script type="text/html" id="case-bar">
+    <button shiro:hasPermission="barrCaseFlow:advance" class="pear-btn pear-btn-normal pear-btn-sm" lay-event="advance" title="进紧邻一格" {{d.status==2||d.stage>=3?'disabled':''}}><i class="layui-icon layui-icon-right"></i></button>
+    <button shiro:hasPermission="barrCaseFlow:rollback" class="pear-btn pear-btn-warming pear-btn-sm" lay-event="rollback" title="退一格重来" {{d.status==2||d.stage==0?'disabled':''}}><i class="layui-icon layui-icon-return"></i></button>
+    <button shiro:hasPermission="barrCaseFlow:withdraw" class="pear-btn pear-btn-sm" style="background-color:#8d6dc4;color:#fff;" lay-event="withdraw" title="住户撤申请收口" {{d.status==2?'disabled':''}}>撤</button>
+    <button shiro:hasPermission="barrCaseFlow:trace" class="pear-btn pear-btn-sm" lay-event="trace" title="逐层回看留痕"><i class="layui-icon layui-icon-time"></i></button>
+</script>
+
+<script type="text/html" id="stage-tpl">
+    {{# var names=['核卷','评估','验收','结清']; }}
+    <span class="layui-badge" {{d.status==2?'layui-bg-black':'layui-bg-blue'}}>{{ names[d.stage] }}</span>
+</script>
+
+<script type="text/html" id="status-tpl">
+    {{# if(d.status==2){ var r={settle:'已结清封住',withdraw:'撤申请封住',merge:'底册并走封住'}; }}
+    <span class="layui-badge layui-bg-black">{{ r[d.endReason] || '已封住' }}</span>
+    {{# } else if(d.stage>0){ }}
+    <span class="layui-badge layui-bg-green">在办</span>
+    {{# } else { }}
+    <span class="layui-badge layui-bg-blue">未起</span>
+    {{# } }}
+</script>
+
+<script type="text/html" id="tier-tpl">
+    {{# var t={1:'基础',2:'提升',3:'重点'}; }}{{ t[d.tierCode] || d.tierCode }}
+</script>
+
+<th:block th:include="include :: footer"/>
+<script>
+    layui.use(['table', 'form', 'jquery'], function () {
+        let table = layui.table;
+        let form = layui.form;
+        let $ = layui.jquery;
+        let MODULE_PATH = rootPath + "/barrCaseFlow/";
+
+        let cols = [[
+            {title: 'ID', field: 'id', hide: true},
+            {title: '卷宗号', field: 'bizNo', width: 190},
+            {title: '住户代号', field: 'ownerCode', width: 120},
+            {title: '点位代号', field: 'siteNo', width: 120},
+            {title: '底册', field: 'archNo', width: 90},
+            {title: '拟改处数', field: 'planCount', width: 90, align: 'center'},
+            {title: '补助档', field: 'tierCode', width: 80, align: 'center', templet: '#tier-tpl'},
+            {title: '停在哪格', field: 'stage', width: 90, align: 'center', templet: '#stage-tpl'},
+            {title: '情形', field: 'status', width: 120, align: 'center', templet: '#status-tpl'},
+            {title: '卷面最近一句', field: 'content', minWidth: 220},
+            {title: '经办人', field: 'createBy', width: 100},
+            {title: '操作', toolbar: '#case-bar', width: 200, align: 'center', fixed: 'right'}
+        ]];
+
+        table.render({
+            elem: '#case-table',
+            url: MODULE_PATH + 'list',
+            page: true,
+            method: 'get',
+            limit: 10,
+            limits: [10, 20, 50],
+            cols: cols,
+            skin: 'line',
+            toolbar: '#case-toolbar',
+            defaultToolbar: ['refresh', 'filter', 'print', 'exports']
+        });
+
+        function queryField() {
+            return $('#case-query-form').serializeArray().reduce(function (o, kv) {
+                o[kv.name] = $.trim(kv.value);
+                return o;
+            }, {});
+        }
+
+        form.on('submit(case-query)', function () {
+            table.reload('case-table', {where: queryField(), page: {curr: 1}});
+            return false;
+        });
+
+        table.on('toolbar(case-table)', function (obj) {
+            if (obj.event === 'add') {
+                layer.open({
+                    type: 2, title: '凑齐四样起一卷', shade: 0.1, area: ['680px', '460px'],
+                    content: MODULE_PATH + 'add'
+                });
+            }
+        });
+
+        function postAction(url, data, confirmText, done) {
+            layer.confirm(confirmText, {icon: 3, title: '提示'}, function (idx) {
+                layer.close(idx);
+                let loading = layer.load();
+                $.post(url, data, function (res) {
+                    layer.close(loading);
+                    if (res.code === 200) {
+                        layer.msg(res.msg, {icon: 1, time: 1200}, done);
+                    } else {
+                        layer.msg(res.msg, {icon: 2, time: 3000});
+                    }
+                }, 'json');
+            });
+        }
+
+        // 进格凭据随目标格而不同：评估要进度卡+分数，验收要签认单号，结清对核销卡
+        function credFields(stage) {
+            if (stage === 0) {
+                return '<label class="layui-form-label">进度卡代号</label><div class="layui-input-block"><input name="cardNo" class="layui-input" placeholder="入户评估对上的改造进度卡代号"></div>'
+                    + '<label class="layui-form-label">评估分数</label><div class="layui-input-block"><input name="score" class="layui-input" placeholder="0..100，分与定档那条答复对得上"></div>';
+            }
+            if (stage === 1) {
+                return '<label class="layui-form-label">签认单号</label><div class="layui-input-block"><input name="billNo" class="layui-input" placeholder="联户验收签认单号，签讫结论可才算过"></div>';
+            }
+            if (stage === 2) {
+                return '<label class="layui-form-label">核销卡代号</label><div class="layui-input-block"><input name="payCardNo" class="layui-input" placeholder="可空，空着用评估对上的卡；核销行已收下才算走过"></div>';
+            }
+            return '';
+        }
+
+        function openAdvance(d) {
+            let target = d.stage + 1;
+            let titles = ['进评估格', '进验收格', '进结清格（结清即封死）'];
+            layer.open({
+                type: 1, title: titles[d.stage] + '（只许迈紧邻一格）', shade: 0.1, area: ['480px', '360px'],
+                content: '<form class="layui-form" style="padding:18px 20px 0 0;">'
+                    + credFields(d.stage)
+                    + '<label class="layui-form-label">报送格次号</label><div class="layui-input-block"><input name="reportedStage" class="layui-input" placeholder="可空；只作转述，系统以数出的格次为准"></div>'
+                    + '<label class="layui-form-label">这一步一句</label><div class="layui-input-block"><textarea name="note" class="layui-textarea"></textarea></div>'
+                    + '<div style="text-align:right;margin-top:10px;"><button type="button" class="pear-btn pear-btn-primary" id="case-advance-ok">确认进格</button></div>'
+                    + '</form>',
+                success: function () {
+                    $('#case-advance-ok').on('click', function () {
+                        let data = {};
+                        $('.layui-layer-content [name]').each(function () {
+                            data[$(this).attr('name')] = $(this).val();
+                        });
+                        data.id = d.id;
+                        layer.closeAll();
+                        postAction(MODULE_PATH + 'advance', data, '确认从「' + ['核卷', '评估', '验收'][d.stage]
+                            + '」进紧邻的下一格？', reloadAll);
+                    });
+                }
+            });
+        }
+
+        table.on('tool(case-table)', function (obj) {
+            let d = obj.data;
+            if (obj.event === 'advance') {
+                if (d.status == 2 || d.stage >= 3) {
+                    layer.msg('已封死或已到结清，进不动了', {icon: 2});
+                    return;
+                }
+                openAdvance(d);
+            } else if (obj.event === 'rollback') {
+                if (d.status == 2) {
+                    layer.msg('封死的卷退不动', {icon: 2});
+                    return;
+                }
+                layer.prompt({title: '退回上一格·这一步一句（可空）', formType: 2, area: ['380px', '120px']}, function (val, idx) {
+                    layer.close(idx);
+                    postAction(MODULE_PATH + 'rollback', {id: d.id, note: val},
+                        '退回只收一格，被退那格旧笔沉底、重走另起一轮，确认？', reloadAll);
+                });
+            } else if (obj.event === 'withdraw') {
+                if (d.status == 2) {
+                    layer.msg('已经封住了', {icon: 2});
+                    return;
+                }
+                layer.prompt({title: '住户撤申请·缘故（可空）', formType: 2, area: ['380px', '120px']}, function (val, idx) {
+                    layer.close(idx);
+                    postAction(MODULE_PATH + 'withdraw', {id: d.id, note: val},
+                        '撤申请也算收尾，封住后只读、改不动删不掉，确认？', reloadAll);
+                });
+            } else if (obj.event === 'trace') {
+                let loading = layer.load();
+                $.get(MODULE_PATH + 'trace/' + d.id, function (res) {
+                    layer.close(loading);
+                    let rows = (res.data || []).map(function (l) {
+                        return '<tr><td>' + l.layerNo + '</td><td>' + ['核卷', '评估', '验收', '结清'][l.stage]
+                            + '·第' + l.roundNo + '轮·' + l.stageRoundSeq + '</td><td>' + actionName(l.action)
+                            + '</td><td>' + (l.verdict || '') + '</td><td>' + (l.note || '')
+                            + '</td><td>' + (l.operator || '') + '</td><td>' + (l.createTime || '') + '</td></tr>';
+                    }).join('');
+                    layer.open({
+                        type: 1, title: '卷宗逐层留痕·' + d.bizNo + '（从末格往回数对受理簿）', area: ['900px', '520px'],
+                        content: '<table class="layui-table"><thead><tr><th>层</th><th>格·轮·次第</th><th>动作</th><th>结论</th><th>这一层一句</th><th>经办</th><th>时间</th></tr></thead><tbody>'
+                            + (rows || '<tr><td colspan="7">暂无</td></tr>') + '</tbody></table>'
+                    });
+                });
+            }
+        });
+
+        function actionName(a) {
+            return {open: '起卷', advance: '进格', rollback: '退格', note: '按语',
+                settle: '结清', withdraw: '撤申请', merge: '底册并走'}[a] || a;
+        }
+
+        function reloadAll() {
+            table.reload('case-table');
+        }
+    });
+</script>
+</html>

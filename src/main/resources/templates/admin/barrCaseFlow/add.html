@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:include="include :: header('一户一档卷宗起卷')"/>
+</head>
+<body>
+<form class="layui-form">
+    <div class="mainBox">
+        <div class="layui-form-item">
+            <label class="layui-form-label">挂靠底册</label>
+            <div class="layui-input-block">
+                <select name="archId" lay-verify="required" lay-search="">
+                    <option value="">请选在册底册（已并走停用的立不了卷）</option>
+                    <option th:each="a : ${archList}"
+                            th:value="${a.id}"
+                            th:text="${a.archNo} + '｜' + ${a.archName} + '｜' + ${a.roadName}"></option>
+                </select>
+            </div>
+        </div>
+        <div class="layui-form-item">
+            <label class="layui-form-label">住户代号</label>
+            <div class="layui-input-inline" style="width:200px;">
+                <input type="text" name="ownerCode" required lay-verify="required" autocomplete="off"
+                       placeholder="住户代号" class="layui-input">
+            </div>
+            <label class="layui-form-label" style="width:90px;">点位代号</label>
+            <div class="layui-input-inline" style="width:200px;">
+                <input type="text" name="siteNo" required lay-verify="required" autocomplete="off"
+                       placeholder="同一住户同一点位只许一张没封住的卷" class="layui-input">
+            </div>
+        </div>
+        <div class="layui-form-item">
+            <label class="layui-form-label">拟改的处数</label>
+            <div class="layui-input-inline" style="width:200px;">
+                <input type="text" name="planCount" required lay-verify="required" autocomplete="off"
+                       placeholder="正整数，零头/负数/空着不收" class="layui-input">
+            </div>
+            <label class="layui-form-label" style="width:120px;">所走的补助那一档</label>
+            <div class="layui-input-inline" style="width:170px;">
+                <select name="tierCode" lay-verify="required">
+                    <option value="">请选档</option>
+                    <option value="1">1 基础</option>
+                    <option value="2">2 提升</option>
+                    <option value="3">3 重点</option>
+                </select>
+            </div>
+        </div>
+        <div class="layui-form-item">
+            <label class="layui-form-label">卷宗号</label>
+            <div class="layui-input-block" style="padding-top:9px;">
+                <span class="layui-word-aux">由系统按卷起号，本子上自带的号一概不认（此格不摆录入框）；经办人随登录身份自动落</span>
+            </div>
+        </div>
+        <div class="layui-form-item">
+            <label class="layui-form-label">备注</label>
+            <div class="layui-input-block">
+                <input type="text" name="remark" autocomplete="off" class="layui-input">
+            </div>
+        </div>
+    </div>
+    <div class="bottom">
+        <div class="button-container">
+            <button type="submit" class="layui-btn layui-btn-normal layui-btn-sm" lay-submit lay-filter="case-save">
+                <i class="layui-icon layui-icon-ok"></i> 起卷
+            </button>
+            <button type="reset" class="layui-btn layui-btn-primary layui-btn-sm">
+                <i class="layui-icon layui-icon-refresh"></i> 重置
+            </button>
+        </div>
+    </div>
+</form>
+<th:block th:include="include :: footer"/>
+<script th:inline="javascript">
+    layui.use(['form', 'jquery'], function () {
+        let form = layui.form;
+        let $ = layui.jquery;
+        let MODULE_PATH = rootPath + "/barrCaseFlow";
+
+        form.on('submit(case-save)', function (data) {
+            $.ajax({
+                url: MODULE_PATH + '/open',
+                data: data.field,
+                dataType: 'json',
+                type: 'post',
+                success: function (result) {
+                    if (result.code == 200) {
+                        layer.msg(result.msg, {icon: 1, time: 1400}, function () {
+                            parent.layer.close(parent.layer.getFrameIndex(window.name));
+                            parent.layui.table.reload("case-table");
+                        });
+                    } else {
+                        layer.msg(result.msg, {icon: 2, time: 3200});
+                    }
+                }
+            });
+            return false;
+        });
+    });
+</script>
+</body>
+</html>

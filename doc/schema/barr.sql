@@ -20,19 +20,71 @@ CREATE TABLE IF NOT EXISTS t_barr_arch (
 
 CREATE TABLE IF NOT EXISTS t_barr_case_flow (
   id bigint NOT NULL COMMENT '主键',
-  biz_no varchar(64) DEFAULT NULL COMMENT '一户一档改造卷宗号',
-  stage int DEFAULT NULL COMMENT '当前格次 0..3（核卷/评估/验收/结清）',
-  status int DEFAULT NULL COMMENT '卷宗走到哪一格 0未起 1在办 2已封住',
-  content varchar(255) DEFAULT NULL COMMENT '一格一记',
+  biz_no varchar(64) DEFAULT NULL COMMENT '一户一档改造卷宗号（系统按卷取号，本子自带号不认）',
+  owner_code varchar(64) DEFAULT NULL COMMENT '住户代号（起卷四样之一）',
+  site_no varchar(64) DEFAULT NULL COMMENT '点位代号（起卷四样之一）',
+  arch_id bigint DEFAULT NULL COMMENT '挂在哪一处底册名下（底册并走时据此封卷）',
+  arch_no varchar(64) DEFAULT NULL COMMENT '底册代号（以底册为准，随卷冗余）',
+  plan_count int DEFAULT NULL COMMENT '拟改的处数（起卷四样之一，正整数）',
+  tier_code int DEFAULT NULL COMMENT '所走的补助那一档（起卷四样之一 1基础 2提升 3重点）',
+  card_no varchar(64) DEFAULT NULL COMMENT '入户评估对上的改造进度卡代号',
+  eval_score decimal(12,3) DEFAULT NULL COMMENT '入户评估落定的分数',
+  eval_tier int DEFAULT NULL COMMENT '评估当场系统复算的档（与所走档对不住进不了验收）',
+  eval_rule_code varchar(64) DEFAULT NULL COMMENT '评估说话那条定档线代号（随卷留底）',
+  sign_bill_no varchar(64) DEFAULT NULL COMMENT '验收联户签认单号（编上号、结论可才算过）',
+  pay_card_no varchar(64) DEFAULT NULL COMMENT '结清时核销对上的卡代号（核销行已收下才算走过）',
+  stage int DEFAULT NULL COMMENT '当前格次 0..3（核卷/评估/验收/结清，只由系统数留痕得出，落库以数出的为准）',
+  status int DEFAULT NULL COMMENT '卷宗情形 0未起 1在办 2已封住（只由格次/封卷派生，不许两处各记）',
+  end_reason varchar(16) DEFAULT NULL COMMENT '封卷缘故 settle结清 / withdraw撤申请 / merge底册并走；空着=没封',
+  stage_rounds varchar(128) DEFAULT NULL COMMENT '各格走到第几轮，竖线隔开（回退一格该格轮次+1，重走另起一层）',
+  content varchar(255) DEFAULT NULL COMMENT '卷面最近一句（沿卷面摆法；逐层原话在留痕表）',
   last_action varchar(64) DEFAULT NULL COMMENT '最近一次挪格动作',
-  del_flag int DEFAULT '0' COMMENT '删除标记 0正常 1删除',
+  del_flag int DEFAULT '0' COMMENT '删除标记 0正常 1撤下留底（封死的卷删不掉，只在办卷可由撤申请收口）',
   create_by varchar(64) DEFAULT NULL COMMENT '创建者',
   create_time datetime DEFAULT NULL COMMENT '创建时间',
   update_by varchar(64) DEFAULT NULL COMMENT '更新者',
   update_time datetime DEFAULT NULL COMMENT '更新时间',
   remark varchar(500) DEFAULT NULL COMMENT '备注',
-  PRIMARY KEY (id)
+  active_site varchar(160) GENERATED ALWAYS AS (CASE WHEN COALESCE(del_flag,0) = 0 AND end_reason IS NULL THEN concat(owner_code, '#', site_no) ELSE NULL END) STORED COMMENT '活卷占位：同一住户同一点位同时只容一张没封住的卷',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_case_no (biz_no),
+  UNIQUE KEY uk_case_active (active_site),
+  KEY idx_case_arch (arch_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='一户一档改造卷宗';
+
+-- 卷宗逐格留痕：一笔一行，只许追加，谁都不许改行删行。
+-- 格次没有第二处来路：卷宗停在哪一格，由系统照这张表把走过的格一笔一笔数出来；
+-- 报送里捎来的格次号只算一句转述，隔格那一笔无效，同一格重报只认头一句、不另叠一层。
+-- layer_no 全卷单调递增（并发两笔撞进同一秒各拿各号，各记各的先后，不并成一条、不漏一条）；
+-- stage_round_seq 是本格本轮里的次第；回退一格旧笔留底，重走该格轮次+1、从新一轮重新攒。
+CREATE TABLE IF NOT EXISTS t_barr_case_log (
+  id bigint NOT NULL COMMENT '主键',
+  case_id bigint NOT NULL COMMENT '落在哪一张卷宗上',
+  case_no varchar(64) DEFAULT NULL COMMENT '当时卷宗号（随笔冗余）',
+  action varchar(16) NOT NULL COMMENT '动作 open/advance/rollback/note/settle/withdraw/merge',
+  from_stage int DEFAULT NULL COMMENT '动前格次',
+  to_stage int DEFAULT NULL COMMENT '动后格次',
+  stage int NOT NULL COMMENT '这笔落在哪一格 0..3（系统钉死，报文格次号不作数）',
+  round_no int NOT NULL DEFAULT 1 COMMENT '落在哪一轮（回退重走新旧两轮分开放）',
+  layer_no int NOT NULL COMMENT '全卷层次第（只增不退，数格次/排先后只认它）',
+  stage_round_seq int NOT NULL COMMENT '本格本轮落笔次第（重走该格从1重新攒）',
+  verdict varchar(8) DEFAULT NULL COMMENT '本格结论 可/不可（落格那句）',
+  note varchar(255) DEFAULT NULL COMMENT '这一层落下的一句（一格一记原话）',
+  operator varchar(64) DEFAULT NULL COMMENT '经办人（登录身份）',
+  create_time datetime DEFAULT NULL COMMENT '落笔时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_case_layer (case_id, layer_no),
+  UNIQUE KEY uk_case_stage_round_seq (case_id, stage, round_no, stage_round_seq),
+  KEY idx_case_trace (case_id, stage, round_no, stage_round_seq)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='一户一档卷宗逐格留痕';
+
+-- 卷宗留痕层次第按卷取号：一张卷一行。layer_no/stage_round_seq 都从这一处发，
+-- 并发各拿各的号，卷面上两层谁先谁后由号钉死，不靠时间戳碰运气。
+CREATE TABLE IF NOT EXISTS t_barr_case_seq (
+  case_id bigint NOT NULL COMMENT '卷宗主键',
+  next_val int NOT NULL DEFAULT 0 COMMENT '下一发号值',
+  PRIMARY KEY (case_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='卷宗留痕取号表';
 
 CREATE TABLE IF NOT EXISTS t_barr_pay_row (
   id bigint NOT NULL COMMENT '主键',
@@ -506,4 +558,39 @@ VALUES (8024001331, 8024001201, 8024001120),
 -- 管理员（id=1）给核销册八项权限
 INSERT IGNORE INTO t_sys_permission_role (id, role_id, permission_id)
 SELECT 8024001540 + n, 488243256161730560, 8024001120 + n
+FROM (SELECT 0 n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6 UNION SELECT 7) t;
+
+-- ============================ 一户一档改造卷宗 ============================
+-- 卷宗流转：菜单与按钮权限（挂在系统管理目录 411522822607867904 下）
+INSERT IGNORE INTO t_sys_permission (id, name, descripion, url, is_blank, pid, perms, type, icon, order_num, visible, create_by, create_time)
+VALUES (8024001130, '一户一档卷宗', '一户一档改造卷宗流转台账', '/barrCaseFlow/view', 0, 411522822607867904, 'barrCaseFlow:view', 1, 'fa fa-archive', 95, 0, 'seed', NOW()),
+       (8024001131, '卷宗集合', '在册/封死卷宗台账（封死的列得出改不动）', '/barrCaseFlow/list', 0, 8024001130, 'barrCaseFlow:list', 2, NULL, NULL, 0, 'seed', NOW()),
+       (8024001132, '卷宗起卷', '凑齐四样立一卷，同点位只许一张没封住的', '/barrCaseFlow/open', 0, 8024001130, 'barrCaseFlow:open', 2, NULL, NULL, 0, 'seed', NOW()),
+       (8024001133, '卷宗进一格', '只许迈紧邻一格，报送格次号只作转述', '/barrCaseFlow/advance', 0, 8024001130, 'barrCaseFlow:advance', 2, NULL, NULL, 0, 'seed', NOW()),
+       (8024001134, '卷宗退一格', '一回只退一格，旧笔沉底重走另起一轮', '/barrCaseFlow/rollback', 0, 8024001130, 'barrCaseFlow:rollback', 2, NULL, NULL, 0, 'seed', NOW()),
+       (8024001135, '住户撤申请收口', '中途撤申请也算收尾，封住只读', '/barrCaseFlow/withdraw', 0, 8024001130, 'barrCaseFlow:withdraw', 2, NULL, NULL, 0, 'seed', NOW()),
+       (8024001136, '底册并走收口', '底册那一处并走了，挂它名下在办卷一并封', '/barrCaseFlow/merge', 0, 8024001130, 'barrCaseFlow:merge', 2, NULL, NULL, 0, 'seed', NOW()),
+       (8024001137, '卷宗逐层回看', '从末格数回头格对受理簿，单层也站得稳', '/barrCaseFlow/trace', 0, 8024001130, 'barrCaseFlow:trace', 2, NULL, NULL, 0, 'seed', NOW());
+
+-- 街道岗：看卷、起卷、进/退、撤申请、回看；底册并走收口归部岗
+INSERT IGNORE INTO t_sys_permission_role (id, role_id, permission_id)
+VALUES (8024001631, 8024001201, 8024001130),
+       (8024001632, 8024001201, 8024001131),
+       (8024001633, 8024001201, 8024001132),
+       (8024001634, 8024001201, 8024001133),
+       (8024001635, 8024001201, 8024001134),
+       (8024001636, 8024001201, 8024001135),
+       (8024001637, 8024001201, 8024001137),
+       (8024001641, 8024001202, 8024001130),
+       (8024001642, 8024001202, 8024001131),
+       (8024001643, 8024001202, 8024001132),
+       (8024001644, 8024001202, 8024001133),
+       (8024001645, 8024001202, 8024001134),
+       (8024001646, 8024001202, 8024001135),
+       (8024001647, 8024001202, 8024001136),
+       (8024001648, 8024001202, 8024001137);
+
+-- 管理员（id=1）给卷宗八项权限
+INSERT IGNORE INTO t_sys_permission_role (id, role_id, permission_id)
+SELECT 8024001560 + n, 488243256161730560, 8024001130 + n
 FROM (SELECT 0 n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6 UNION SELECT 7) t;
